@@ -1857,7 +1857,7 @@ class BaseAdapter(ConnectionPool):
             if isinstance(obj, datetime.datetime):
                 obj = obj.isoformat(self.T_SEP)[:19]
             elif isinstance(obj, datetime.date):
-                obj = obj.isoformat()[:10]+' 00:00:00'
+                obj = obj.isoformat()[:10]+self.T_SEP+'00:00:00'
             else:
                 obj = str(obj)
         elif fieldtype == 'time':
@@ -8307,8 +8307,9 @@ class Table(object):
         field_type = self if same_db else 'bigint'
         clones = []
         for field in self:
+            nfk = same_db or field.type.startswith('reference')
             clones.append(field.clone(
-                    unique=False, type=field.type if same_db else 'bigint'))
+                    unique=False, type=field.type if nfk else 'bigint'))
         archive_db.define_table(
             archive_name, Field(current_record,field_type), *clones)
         self._before_update.append(

@@ -29,6 +29,7 @@ import tempfile
 import random
 import string
 import urllib2
+
 try:
     import simplejson as sj #external installed library
 except:
@@ -71,8 +72,13 @@ import logging.config
 # This needed to prevent exception on Python 2.5:
 # NameError: name 'gluon' is not defined
 # See http://bugs.python.org/issue1436
+
+# attention!, the import Tkinter in messageboxhandler, changes locale ...
 import gluon.messageboxhandler
 logging.gluon = gluon
+# so we must restore it! Thanks ozancag
+import locale
+locale.setlocale(locale.LC_CTYPE, "C") # IMPORTANT, web2py requires locale "C"
 
 exists = os.path.exists
 pjoin = os.path.join
