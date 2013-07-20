@@ -710,6 +710,7 @@ class BaseAdapter(ConnectionPool):
         os.unlink(filename)
 
     def find_driver(self,adapter_args,uri=None):
+        self.adapter_args = adapter_args
         if getattr(self,'driver',None) != None:
             return
         drivers_available = [driver for driver in self.drivers
@@ -950,7 +951,8 @@ class BaseAdapter(ConnectionPool):
                 dbpath, '%s_%s.table' % (table._db._uri_hash, tablename))
 
         if table._dbt:
-            table._loggername = pjoin(dbpath, 'sql.log')
+            logfilename = self.adapter_args.get('logfile','sql.log')
+            table._loggername = pjoin(dbpath, logfilename)
             logfile = self.file_open(table._loggername, 'a')
         else:
             logfile = None
@@ -1538,6 +1540,7 @@ class BaseAdapter(ConnectionPool):
         args_get = attributes.get
         tablenames = tables(query)
         tablenames_for_common_filters = tablenames
+        fields = [f for f in fields if not isinstance(f,Field.Virtual)] #  skip virtual fields
         for field in fields:
             if isinstance(field, basestring) \
                     and REGEX_TABLE_DOT_FIELD.match(field):
@@ -2109,19 +2112,17 @@ class BaseAdapter(ConnectionPool):
         rowsobj = Rows(db, new_rows, colnames, rawrows=rows)
 
         for tablename in virtualtables:
-            ### new style virtual fields
             table = db[tablename]
-            fields_virtual = [(f,v) for (f,v) in table.iteritems()
-                              if isinstance(v,FieldVirtual)]
-            fields_lazy = [(f,v) for (f,v) in table.iteritems()
-                           if isinstance(v,FieldMethod)]
-            if fields_virtual or fields_lazy:
+            all_fields = filter(lambda nv: nv[1] in fields and
+                                isinstance(nv[1],(FieldVirtual,FieldMethod)),
+                                table.iteritems())            
+            if all_fields:
                 for row in rowsobj.records:
-                    box = row[tablename]
-                    for f,v in fields_virtual:
-                        box[f] = v.f(row)
-                    for f,v in fields_lazy:
-                        box[f] = (v.handler or VirtualCommand)(v.f,row)
+                    box = row[tablename] # CHECK THIS
+                    for fieldname,field in all_fields:
+                        box[fieldname] = field.f(row) \
+                            if isinstance(field,FieldVirtual) else \
+                            (field.handler or VirtualCommand)(field.f,row)
 
             ### old style virtual fields
             for item in table.virtualfields:
@@ -2568,6 +2569,8 @@ class PostgreSQLAdapter(BaseAdapter):
         'reference TFK': ' CONSTRAINT FK_%(foreign_table)s_PK FOREIGN KEY (%(field_name)s) REFERENCES %(foreign_table)s (%(foreign_key)s) ON DELETE %(on_delete_action)s',
 
         }
+
+    QUOTE_TEMPLATE = '%s'
 
     def varquote(self,name):
         return varquote_aux(name,'"%s"')
@@ -5540,8 +5543,9 @@ class MongoDBAdapter(NoSQLAdapter):
         filter = None
         if query:
             filter = self.expand(query)
+        # do not try to update id fields to avoid backend errors
         modify = {'$set': dict((k.name, self.represent(v, k.type)) for
-                  k, v in fields)}
+                  k, v in fields if (not k.name in ("_id", "id")))}
         return modify, filter
 
     def update(self, tablename, query, fields, safe=None):
@@ -8307,7 +8311,7 @@ class Table(object):
         field_type = self if same_db else 'bigint'
         clones = []
         for field in self:
-            nfk = same_db or field.type.startswith('reference')
+            nfk = same_db or not field.type.startswith('reference')
             clones.append(field.clone(
                     unique=False, type=field.type if nfk else 'bigint'))
         archive_db.define_table(
